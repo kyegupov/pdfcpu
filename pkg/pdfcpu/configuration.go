@@ -85,6 +85,7 @@ const (
 	ADDPROPERTIES
 	REMOVEPROPERTIES
 	COLLECT
+	RELATIVIZEFILELINKS
 )
 
 // Configuration of a Context.

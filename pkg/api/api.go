@@ -1874,3 +1874,67 @@ func CollectFile(inFile, outFile string, selectedPages []string, conf *pdf.Confi
 
 	return Collect(f1, f2, selectedPages, conf)
 }
+
+// RelativizeFileLinks converts absolute links to file:/// urls to relative urls.
+// Helpful when generating a bunch of interconnected PDF documents from HTML pages.
+func RelativizeFileLinks(rs io.ReadSeeker, w io.Writer, selectedPages []string, conf *pdf.Configuration) error {
+
+	if conf == nil {
+		conf = pdf.NewDefaultConfiguration()
+	}
+	conf.Cmd = pdf.RELATIVIZEFILELINKS
+
+	return processSelectedPages(rs, w, selectedPages, conf, "relativize_file_links, write",
+		func(ctx *pdf.Context, pages pdf.IntSet) error {
+			return pdf.RelativizeFileLinks(ctx, pages)
+		},
+	)
+}
+
+// processSelectedPages is a generic function to apply an action to selected pages
+// of a PDF stream
+// TODO: use this for Rotate, AddWatermark, Collect etc.
+func processSelectedPages(
+	rs io.ReadSeeker, w io.Writer, selectedPages []string, conf *pdf.Configuration,
+	actionName string, action func(ctx *pdf.Context, pages pdf.IntSet) error) error {
+
+	fromStart := time.Now()
+	ctx, durRead, durVal, durOpt, err := readValidateAndOptimize(rs, conf, fromStart)
+	if err != nil {
+		return err
+	}
+
+	if err := ctx.EnsurePageCount(); err != nil {
+		return err
+	}
+
+	from := time.Now()
+	pages, err := PagesForPageSelection(ctx.PageCount, selectedPages, true)
+	if err != nil {
+		return err
+	}
+
+	if err = action(ctx, pages); err != nil {
+		return err
+	}
+
+	log.Stats.Printf("XRefTable:\n%s\n", ctx)
+	durStamp := time.Since(from).Seconds()
+	fromWrite := time.Now()
+
+	if conf.ValidationMode != pdf.ValidationNone {
+		if err = ValidateContext(ctx); err != nil {
+			return err
+		}
+	}
+
+	if err = WriteContext(ctx, w); err != nil {
+		return err
+	}
+
+	durWrite := durStamp + time.Since(fromWrite).Seconds()
+	durTotal := time.Since(fromStart).Seconds()
+	logOperationStats(ctx, actionName, durRead, durVal, durOpt, durWrite, durTotal)
+
+	return nil
+}
